@@ -1,0 +1,49 @@
+name: Deploy to Filebase (S3 + IPFS + MFS + IPNS)
+
+on:
+  push:
+    branches:
+      - gh-pages
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Upload to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: aws s3 sync public s3://jsmedley-littlelink --endpoint-url=https://s3.filebase.com --delete
+
+      - name: Stage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: aws s3api put-bucket-tagging --bucket jsmedley-littlelink  --tagging 'TagSet=[{Key=generateBucketCid,Value=${{ github.run_id }}}]' --endpoint-url=https://s3.filebase.com
+
+      - name: Stat
+        id: stat
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          result=$(aws --endpoint https://s3.filebase.com s3api get-bucket-tagging --bucket jsmedley-littlelink)
+          cid=$(echo $result | jq -r '.TagSet[] | select(.Key=="CID") | .Value')
+          echo "folder_cid=$cid" >> $GITHUB_OUTPUT
+
+      - name: Deploy
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          npx @filebase/cli name update js-littlelink ${{ steps.stat.outputs.folder_cid }}
+
